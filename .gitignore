@@ -1,0 +1,8 @@
+.venv/
+__pycache__/
+*.egg-info/
+results/
+build/
+dist/
+# Disposable test directories created at the project root.
+/tmp*/

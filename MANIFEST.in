@@ -1,0 +1,4 @@
+include docs/ANALYZER.md docs/ANALYZER_PROTOCOL.md
+recursive-include tests *.py
+include tools/smoke_desktop_analyzer.py tools/smoke_ui_ipc.py
+include docs/IPC.md docs/IPC_PROTOCOL.md docs/IPC_PLAN.md

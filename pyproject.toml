@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "image-lab"
+version = "0.1.0"
+description = "Local wallpaper organizer and compatibility CLI for Imagescope"
+requires-python = ">=3.11"
+dependencies = ["imagescope==0.1.0", "Pillow>=10"]
+
+[project.optional-dependencies]
+desktop = ["PySide6>=6.6"]
+
+[project.scripts]
+image-lab = "image_lab:main"
+image-lab-ui = "image_lab_ui.app:main"
+
+[tool.setuptools]
+py-modules = ["image_lab"]
+packages = ["image_lab_ui"]
+
+[tool.setuptools.package-data]
+image_lab_ui = ["*.qml", "assets/*.svg"]
