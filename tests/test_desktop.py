@@ -1,3 +1,4 @@
+import gc
 import importlib.util
 import os
 import sys
@@ -14,7 +15,7 @@ HAS_QT = importlib.util.find_spec("PySide6") is not None
 if HAS_QT:
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     os.environ.setdefault("QT_QUICK_BACKEND", "software")
-    from PySide6.QtCore import QEventLoop, QMetaObject, QObject, QTimer, QUrl, Qt
+    from PySide6.QtCore import QCoreApplication, QEvent, QEventLoop, QMetaObject, QObject, QTimer, QUrl, Qt
     from PySide6.QtGui import QGuiApplication
     from PySide6.QtQml import QQmlApplicationEngine
     from PySide6.QtQuick import QQuickWindow
@@ -32,6 +33,10 @@ class DesktopTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parents[1])
         self.addCleanup(self.temp.cleanup)
+        # Run last (after window/engine cleanups and bound-method references are
+        # released): finalize any orphaned PySide cycles on the GUI thread,
+        # rather than letting a later worker collect a previous test's QObjects.
+        self.addCleanup(self._collect_qt_garbage)
         self.root = Path(self.temp.name)
         self.fake_command = (sys.executable, str(Path(__file__).parent / 'helpers' / 'fake_analyzer.py'))
         self.theme_file = self.root / 'theme' / 'colors.toml'
@@ -41,6 +46,11 @@ class DesktopTests(unittest.TestCase):
         self.addCleanup(self.controller.catalog.close)
         self.image = self.root / "test.png"
         Image.new("RGB", (150, 100), "red").save(self.image)
+
+    def _collect_qt_garbage(self):
+        self.controller = None
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        gc.collect()
 
     @contextmanager
     def analyzer_mode(self, mode):
@@ -203,9 +213,11 @@ class DesktopTests(unittest.TestCase):
         self.controller.toggleChecked(image_id)
         for attribute in ('_busy', '_submitting'):
             setattr(self.controller, attribute, True)
+            if attribute == '_busy': self.controller._kind = 'scan'
             self.assertFalse(self.controller.removeImages([image_id])['ok'])
             self.assertIsNotNone(self.controller.catalog.get(image_id))
             setattr(self.controller, attribute, False)
+            self.controller._kind = ''
         self.controller.search('test')
         self.controller.setLibraryFilter('needs_tags')
         self.assertTrue(self.controller.removeImages([image_id])['ok'])
@@ -382,9 +394,11 @@ class DesktopTests(unittest.TestCase):
         saved = catalog.get(image_id)
         original = self.image.read_bytes()
         self.controller._busy = True
+        self.controller._kind = 'scan'
         result = self.controller.renameImage(image_id, str(self.image), 'red-flower.png')
         self.assertFalse(result['ok'])
         self.controller._busy = False
+        self.controller._kind = ''
         self.assertFalse(self.controller.renameImage(image_id + 1, str(self.image), 'red-flower.png')['ok'])
         engine = QQmlApplicationEngine()
         engine.rootContext().setContextProperty('controller', self.controller)
@@ -828,6 +842,100 @@ class DesktopTests(unittest.TestCase):
                 self.assertGreaterEqual(len(ticks), 10, 'UI callbacks stalled during inference')
                 self.assertLess(max(b - a for a, b in zip(ticks, ticks[1:])), 0.75)
                 self.assertGreater(ticks[-1] - ticks[0], 1.0)
+
+    def test_worker_gc_guard_restores_previous_state_after_overlapping_jobs(self):
+        self.controller.catalog.import_image(self.image)
+        self.controller.select(self.controller.catalog.rows()[0]['id'])
+        before = gc.isenabled()
+        with self.analyzer_mode('slow'):
+            self.controller.analyze()
+            self.wait_for_submission()
+            self.assertTrue(self.controller.busy)
+            self.assertFalse(gc.isenabled())
+            self.controller.analyze()  # submission and analysis overlap
+            self.wait_for_submission()
+            self.assertFalse(gc.isenabled())
+            self.wait_for_batch()
+        self.assertEqual(gc.isenabled(), before)
+        self.assertEqual(self.controller._active_python_workers, 0)
+        if before:
+            gc.disable()
+            try:
+                with self.analyzer_mode('success'):
+                    self.controller.analyze()
+                    self.wait_for_batch()
+                self.assertFalse(gc.isenabled())
+            finally:
+                gc.enable()
+        self.assertEqual(self.controller._active_python_workers, 0)
+
+    def test_gc_guard_is_shared_between_controllers(self):
+        other = Controller(self.root / 'other-cache', analyzer_command=self.fake_command,
+                           theme_paths=[self.theme_file])
+        self.addCleanup(other.catalog.close)
+        self.addCleanup(other.omarchy_palette.timer.stop)
+        original = gc.isenabled()
+        try:
+            self.controller._begin_python_worker()
+            other._begin_python_worker()
+            self.controller._end_python_worker()
+            self.assertFalse(gc.isenabled())
+            other._end_python_worker()
+            self.assertEqual(gc.isenabled(), original)
+        finally:
+            if self.controller._active_python_workers:
+                self.controller._end_python_worker()
+            if other._active_python_workers:
+                other._end_python_worker()
+
+    def test_unrelated_details_and_rename_remain_available_during_analysis(self):
+        catalog = self.controller.catalog
+        catalog.import_image(self.image)
+        other = self.root / 'other.png'
+        Image.new('RGB', (80, 80), 'blue').save(other)
+        catalog.import_image(other)
+        running_id = next(row['id'] for row in catalog.rows() if row['path'] == str(self.image))
+        other_id = next(row['id'] for row in catalog.rows() if row['path'] == str(other))
+        catalog.store_result(other_id, catalog.fingerprint(other),
+                             {'vision': {'caption': 'Blue image', 'tags': ['blue']}})
+        self.controller.select(other_id)
+        with self.analyzer_mode('slow'):
+            self.controller.enqueue([running_id], replace=True)
+            loop = QEventLoop()
+            timer = QTimer()
+            timer.setInterval(10)
+            timer.timeout.connect(lambda: loop.quit() if self.controller._progress.get('stage') == 2 else None)
+            timer.start()
+            QTimer.singleShot(10000, loop.quit)
+            loop.exec()
+            timer.stop()
+            try:
+                self.assertTrue(self.controller.busy)
+                self.assertEqual(self.controller._progress.get('stage'), 2)
+                self.assertTrue(self.controller.canEditDetails)
+                self.assertTrue(self.controller.canRename)
+                revision = self.controller.detailsForEditing()['editRevision']
+                result = self.controller.saveImageDetails(other_id, revision,
+                                                          {'caption': 'Blue revised', 'tags': ['blue'],
+                                                           'medium': '', 'mood': [], 'composition': [],
+                                                           'text_present': False, 'watermark_present': False})
+                self.assertTrue(result['ok'], result)
+                renamed = self.controller.renameImage(other_id, str(other), 'other-renamed.png')
+                self.assertTrue(renamed['ok'], renamed)
+                self.assertTrue(other.with_name('other-renamed.png').is_file())
+                self.assertEqual(catalog.get(other_id)['path'], str(other.with_name('other-renamed.png')))
+                self.assertEqual(self.controller.imageDetails(other_id)['caption'], 'Blue revised')
+                self.controller.select(running_id)
+                self.assertFalse(self.controller.canRename)
+                self.assertFalse(self.controller.canEditDetails)
+                self.assertFalse(self.controller.removeImages([running_id])['ok'])
+                removed = self.controller.removeImages([other_id])
+                self.assertTrue(removed['ok'], removed)
+                self.assertTrue(other.with_name('other-renamed.png').is_file())
+            finally:
+                self.wait_for_worker()
+        self.assertIsNone(catalog.get(other_id))
+        self.assertIsNotNone(catalog.get(running_id))
 
     def test_completion_updates_only_changed_tile_with_and_without_search(self):
         self.controller.catalog.import_image(self.image)

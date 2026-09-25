@@ -12,7 +12,10 @@ The project owner has expressed the intent to release Image Lab under the **Comm
 
 Promotion through OldJobobo's personal profile and channels can help people discover CommonFIRE through the tool itself. Lead Image Lab's public description with what it does; explain the organizational connection afterward.
 
-This records release intent, not a completed publication, repository transfer, or authorization to change remote repositories or billing. The final repository name, release timing, and Imagescope's ownership remain undecided.
+The owner chose an MIT release under CommonFIRE and confirmed the Image Lab
+repository address. A **private, empty** organization repository has been created
+and configured as this checkout's `origin`; no source has been pushed and no
+release has been published. Imagescope stays a separate project.
 
 ## Why Image Lab fits
 
@@ -32,10 +35,10 @@ These points were grounded in a read-only review of `README.md`, `EVALUATION.md`
 
 ## Before public release
 
-- [ ] Confirm the destination repository under `commonfire-foundation` and whether this is a new publication or a transfer.
-- [ ] Choose and add an explicit project license. No root license file was present during the review; do not infer a license from organizational intent.
-- [ ] Make installation practical for users outside the development workspace. Image Lab currently pins the separate `imagescope==0.1.0` dependency, which its README describes as unpublished on PyPI.
-- [ ] Coordinate compatible Imagescope distribution without assuming that Imagescope must also move to CommonFIRE.
+- [x] Create the private, empty Image Lab repository under CommonFIRE and add its Git remote. No commits, tags, or assets have been pushed.
+- [x] Add the owner-approved MIT license to the repository and package metadata, crediting OldJobobo as creator.
+- [x] Prepare a user-local release-bundle installer; the old RC1 development-snapshot candidate is superseded.
+- [x] Imagescope `v0.1.0rc2` is a published prerelease at commit `333cd17`. The old RC1 public wheel lacks APIs Image Lab needs. Use the published RC2 wheel and source archive, not a relabelled development snapshot. Image Lab publication requires fresh acceptance with those exact artifacts.
 - [ ] Review source and release contents for personal paths, private data, and image rights. Do not blindly publish local `results/`, catalogs, caches, or development artifacts.
 - [ ] Update public documentation and package metadata with the confirmed repository, creator/maintainer credit, installation instructions, and a concise CommonFIRE connection.
 - [ ] Run the relevant test and installed-package checks, and state supported platforms and remaining limitations accurately.
@@ -47,18 +50,12 @@ The owner's current goal is **$0 spending**. Keep the organization on GitHub Fre
 
 No GitHub settings or spending controls have been verified or changed as part of this handoff.
 
-## Related planning workspace
+## Organization
 
-The local CommonFIRE planning documents are in:
-
-`/home/oldjobobo/Projects/commonfire/`
-
-- `MISSION.md` — mission statement and organization description.
-- `VISION.md` — founding vision and commitments.
-- `GITHUB-FREE-GUIDE.md` — free allowances, zero-spend setup checklist, and official references.
-- `README.md` — workspace overview.
-
-That workspace is separate from Image Lab; this handoff does not authorize edits there.
+Internal planning records are maintained separately and are not part of this release.
 
 Organization:
 https://github.com/commonfire-foundation
+
+Image Lab repository:
+https://github.com/commonfire-foundation/image-lab

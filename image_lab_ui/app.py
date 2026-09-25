@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import gc
 import json
 import os
 from pathlib import Path
@@ -28,6 +29,14 @@ from .queue import JobQueue
 from .edit_session import EditorSession
 from .storage import storage_paths
 from .omarchy_palette import OmarchyPalette, qt_palette
+
+
+# Cyclic PySide wrappers can otherwise be finalized by CPython's collector on
+# whichever Python-backed QThread happens to allocate next. Track *all*
+# controllers, not just one, so an idle controller cannot re-enable collection
+# while another controller's worker is still running.
+_python_workers_active = 0
+_python_workers_restore_gc = False
 
 
 def view_record(row):
@@ -274,6 +283,7 @@ class Controller(QObject):
         self.worker = None
         self.submission_thread = self.submission_worker = None
         self._submitting = False
+        self._active_python_workers = 0
         self._close_requested = False
         self._selected_state = ''
         self._queue_page = 0
@@ -298,6 +308,27 @@ class Controller(QObject):
             self.uiAction.emit('window.close', 0)
             return True
         return super().eventFilter(watched, event)
+
+    def _begin_python_worker(self):
+        global _python_workers_active, _python_workers_restore_gc
+        # These methods run on the GUI thread. Collect GUI-affine Qt wrappers
+        # here, never from the Python slot running in a worker QThread.
+        if not _python_workers_active:
+            _python_workers_restore_gc = gc.isenabled()
+            if _python_workers_restore_gc:
+                gc.collect()
+                gc.disable()
+        _python_workers_active += 1
+        self._active_python_workers += 1
+
+    def _end_python_worker(self):
+        global _python_workers_active, _python_workers_restore_gc
+        self._active_python_workers -= 1
+        _python_workers_active -= 1
+        if not _python_workers_active and _python_workers_restore_gc:
+            gc.collect()
+            gc.enable()
+            _python_workers_restore_gc = False
 
     def _editing_work_active(self):
         return self.busy or bool(self._batch.get('queued') or self._batch.get('running'))
@@ -502,6 +533,7 @@ class Controller(QObject):
         if not self.canQueue:
             return
         self._submitting = True
+        self._begin_python_worker()
         self.setStatus('Adding images to queue…')
         self.submission_thread = QThread(self)
         self.submission_worker = SubmissionWorker(self.catalog.directory, self.catalog.thumbnails,
@@ -529,6 +561,7 @@ class Controller(QObject):
         self._submitting = False
         if self._close_requested: self.pauseBatch()
         self.runNext()
+        self._end_python_worker()
         self.changed.emit()
 
     @Slot(int)
@@ -678,8 +711,8 @@ class Controller(QObject):
     def removeImages(self, image_ids):
         if self.editorActive:
             return {'ok': False, 'error': 'Close the image editor before removing library images.'}
-        if self.busy:
-            return {'ok': False, 'error': 'Wait for active work to finish before removing images.'}
+        if self.scanning or self._submitting:
+            return {'ok': False, 'error': 'Wait for scanning or queue submission to finish before removing images.'}
         selected_id = self._selected.get('imageId')
         try:
             count = self.catalog.remove_images(image_ids)
@@ -696,9 +729,17 @@ class Controller(QObject):
         self.progressChanged.emit()
         return {'ok': True, 'error': '', 'count': count}
 
+    def _can_change_image(self, image_id):
+        # A queued/running source belongs to the analyzer. Other records can
+        # change during inference, but not while scanning or submitting a batch
+        # (before its target IDs have been reserved).
+        return (not self.editorActive and not self.scanning and not self._submitting
+                and self.queue.image_state(image_id) not in ('queued', 'running'))
+
     @Property(bool, notify=changed)
     def canEditDetails(self):
-        return bool(self._selected.get('analyzed')) and self.canRename
+        image_id = self._selected.get('imageId')
+        return bool(self._selected.get('analyzed')) and bool(image_id) and self._can_change_image(image_id)
 
     @Property(QObject, constant=True)
     def viewerMetadata(self):
@@ -732,15 +773,15 @@ class Controller(QObject):
     @Slot(int, str, 'QVariantMap', result='QVariantMap')
     def saveImageDetails(self, image_id, revision, values):
         if not self.canEditDetails:
-            return {'ok': False, 'error': 'Wait for active work to finish and remove this image from the queue before editing.'}
+            return {'ok': False, 'error': 'Finish scanning or submission, or wait for this image’s queued analysis.'}
         if self._selected.get('imageId') != image_id:
             return {'ok': False, 'error': 'Selection changed. Reopen the editor.'}
         return self.updateImageDetails(image_id, revision, values)
 
     def updateImageDetails(self, image_id, revision, values):
         """Selection-independent edit shared by QML's guarded wrapper and IPC."""
-        if self.editorActive or self.busy or self.queue.image_state(image_id) in ('queued', 'running'):
-            return {'ok': False, 'error': 'Close the image editor and finish queued work first.'}
+        if not self._can_change_image(image_id):
+            return {'ok': False, 'error': 'Finish scanning or submission, or wait for this image’s queued analysis.'}
         try:
             self.catalog.save_details(image_id, revision, values)
         except (OSError, ValueError, sqlite3.Error) as error:
@@ -755,20 +796,21 @@ class Controller(QObject):
 
     @Property(bool, notify=changed)
     def canRename(self):
-        return bool(self._selected) and not self.editorActive and not self.busy and self._selected_state not in ('queued', 'running')
+        image_id = self._selected.get('imageId')
+        return bool(image_id) and self._can_change_image(image_id)
 
     @Slot(int, str, str, result='QVariantMap')
     def renameImage(self, image_id, expected_path, name):
         if not self.canRename:
-            return {'ok': False, 'error': 'Wait for active work to finish and remove this image from the queue before renaming.'}
+            return {'ok': False, 'error': 'Finish scanning or submission, or wait for this image’s queued analysis.'}
         if self._selected.get('imageId') != image_id or self._selected.get('path') != expected_path:
             return {'ok': False, 'error': 'Selection changed. Reopen the naming dialog.'}
         return self.renameById(image_id, expected_path, name)
 
     def renameById(self, image_id, expected_path, name):
         """Selection-independent rename; filesystem guards remain in Catalog."""
-        if self.editorActive or self.busy or self.queue.image_state(image_id) in ('queued', 'running'):
-            return {'ok': False, 'error': 'Close the image editor and finish queued work first.'}
+        if not self._can_change_image(image_id):
+            return {'ok': False, 'error': 'Finish scanning or submission, or wait for this image’s queued analysis.'}
         try:
             new_path = self.catalog.rename_image(image_id, expected_path, name)
         except (FileExistsError, FilenameConflict):
@@ -859,6 +901,7 @@ class Controller(QObject):
         if self.editorActive or self._busy:
             return
         self._busy = True
+        self._begin_python_worker()
         self._work_success = False
         self._scan_cancelled = False
         self._kind = kind
@@ -899,6 +942,7 @@ class Controller(QObject):
         self.thread = self.worker = None
         self._busy = False
         self.refreshBatch()
+        self._end_python_worker()
         self.workCompleted.emit(self._kind, self._work_success, self._scan_cancelled, self._status)
         self.progressChanged.emit()
         if self._batch.get('state') == 'running':

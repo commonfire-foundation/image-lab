@@ -22,7 +22,7 @@ class ImagescopeIntegrationTests(unittest.TestCase):
         self.root = Path(self.temp.name)
 
     def test_separate_distribution_and_default_command(self):
-        self.assertEqual(importlib.metadata.version('imagescope'), '0.1.0')
+        self.assertEqual(importlib.metadata.version('imagescope'), '0.1.0rc2')
         self.assertEqual(DEFAULT_COMMAND, (sys.executable, '-m', 'imagescope'))
         checkout = Path(__file__).resolve().parents[1]
         self.assertFalse((checkout / 'image_analyzer').exists())

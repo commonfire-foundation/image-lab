@@ -362,8 +362,8 @@ class ControlRouter(QObject):
 
     def editable(self, image_id):
         row = self.row(image_id)
-        if self.c.busy or self.c.queue.image_state(image_id) in ('queued', 'running'):
-            raise ControlError('busy', 'Image is busy or queued')
+        if not self.c._can_change_image(image_id):
+            raise ControlError('busy', 'Scanning/submission active or this image is queued/running')
         return row
 
     @staticmethod

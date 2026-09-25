@@ -1,12 +1,13 @@
 # Imagescope integration
 
-Image Lab consumes the standalone `imagescope==0.1.0` distribution. It no longer
+Image Lab consumes the standalone `imagescope==0.1.0rc2` distribution. It no longer
 ships or builds an internal analyzer. With sibling checkouts, install both into
 the same environment:
 
 ```sh
 python -m venv .venv
 .venv/bin/python -m pip install -e ../imagescope -e '.[desktop]'
+.venv/bin/python -m pip check
 .venv/bin/python -m imagescope info --json
 .venv/bin/image-lab-ui
 ```

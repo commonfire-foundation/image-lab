@@ -1,33 +1,76 @@
 # Image Lab
 
-A small local experiment for wallpaper tagging and measurable image properties.
-The CLI never edits, renames, or moves originals and creates no database,
-embeddings, sorting, model downloads, or network services. The optional Qt Quick
-desktop interface adds a local SQLite catalog, thumbnail cache, and explicitly
-confirmed same-folder file renaming. Scanning and analysis leave originals untouched.
+Image Lab is a local wallpaper library and image-preparation workbench for Linux.
+Browse a contact sheet, generate and correct searchable tags with a local Ollama
+model, inspect file facts and measurements, and crop, rotate, flip, or resize
+stills before exporting a new copy. Editing works without Ollama. Originals are
+never overwritten by the editor; renaming an original is a separate, explicitly
+confirmed library action. The optional Qt Quick desktop keeps its catalog and
+thumbnails locally. The headless CLI analyzes images without a catalog or edits.
 
-## Setup
+## Install
 
-Linux and Python 3.11+ are required. Imagescope is a separate dependency, not
-currently published to PyPI. With its checkout next to this one at `../imagescope`:
+Image Lab is MIT-licensed and released through the CommonFIRE organization.
+It requires the published Imagescope `0.1.0rc2` prerelease. The older RC1
+wheel lacks APIs used by Image Lab; do not substitute it. On Linux with
+Python 3.11+, extract the **release bundle** (not the similarly named Python
+source archive) and run:
+
+```sh
+tar -xzf image-lab-0.1.0.tar.gz
+cd image-lab-0.1.0
+python3 install.py --dry-run
+python3 install.py
+```
+
+The installer verifies the bundled Image Lab and Imagescope wheels and provider
+source archive, creates an isolated user-local Python environment, checks the
+installed dependencies, and adds `image-lab`, `image-lab-ui` and `imagescope` commands plus an application-menu
+entry. It uses `uv` if available, otherwise a Python venv with pip; dependency
+installation needs network access unless all transitive wheels are available
+locally. No sudo or system package changes are required. Ensure `~/.local/bin`
+is on `PATH`, or launch Image Lab from the app menu. Existing commands/desktop
+entries are left alone unless you explicitly pass `--replace-existing`; prior
+links are saved inside the new installation. `--no-desktop` skips the menu entry.
+The bundle includes the tested Imagescope prerelease wheel and its matching
+published source archive. Image Lab 0.1.0 is an initial release, not a guarantee
+that Qt-native crashes cannot occur on every configuration.
+
+## Development setup
+
+Imagescope is a **separate** dependency. Image Lab 0.1.0 pins the published
+`imagescope==0.1.0rc2` prerelease, which includes the metadata and color-policy
+APIs used by the viewer and editor. The published RC1 wheel does not. With the
+compatible checkout next to this one:
 
 ```sh
 python -m venv .venv
 .venv/bin/python -m pip install -e ../imagescope -e '.[desktop]'
-.venv/bin/imagescope --help
+.venv/bin/python -m pip check
+.venv/bin/python -m imagescope info --json
 .venv/bin/image-lab --help
 ```
 
-For a headless installation using only `image-lab`, use `-e .` instead.
-The editable Imagescope installation picks up changes from its separate checkout;
-there is no bundled analyzer or fallback. Always launch Image Lab with this Python
-environment. Existing processes must be restarted after upgrading.
+For headless development, replace `-e '.[desktop]'` with `-e .`. The editable
+Imagescope install picks up changes from its separate checkout; no analyzer is
+bundled and there is no fallback. Launch Image Lab with that environment's Python
+and restart existing processes after upgrading. The pinned dependency is not just
+a CLI version: Image Lab currently imports internal Imagescope decoder and
+validation helpers, so version equality alone cannot establish compatibility.
 
-Image Lab pins `imagescope==0.1.0` because it currently uses internal decoder and
-validation helpers as well as the versioned CLI protocol. For non-development
-installs, install a matching Imagescope wheel before the Image Lab wheel.
-`python tools/build_packages.py --sdist` now builds Image Lab only (pip and
-setuptools 68+ must already be installed).
+For a wheel install, supply the published Imagescope RC2 wheel and install
+Image Lab with normal dependency resolution (for example,
+`pip install --find-links /path/to/wheelhouse 'image_lab-0.1.0-py3-none-any.whl[desktop]'`).
+Run `pip check`, `imagescope info --json`, and the packaged workflow acceptance
+in `docs/RELEASE_CHECKLIST.md` before distributing Image Lab. Do not use
+`--no-deps` to conceal a missing provider. `python tools/build_packages.py
+--sdist` builds Image Lab only (pip and setuptools 77+ must already be
+installed). To assemble a bundle from the published provider artifacts, run
+`python tools/build_release_bundle.py --imagescope-wheel
+/path/to/imagescope-0.1.0rc2-py3-none-any.whl --imagescope-source-archive
+/path/to/imagescope-0.1.0rc2.tar.gz --imagescope-ref
+333cd177d6e0c8f63beae55c8ef5c46cea202faf`. The builder copies these
+artifacts byte-for-byte; it does not publish or modify Imagescope.
 
 Analyzer dependencies are Pillow and NumPy. A standard 64-bit difference hash is implemented
 locally, so ImageHash is not required. Dependency installation is an explicit setup
@@ -112,8 +155,8 @@ or select it and use the same action in the sidebar. For multiple images, Ctrl-c
 **Remove selected…**. Both actions ask for confirmation. Originals stay on disk;
 their catalog records, saved tags, edits, and analysis history are removed.
 Scanning the folder again adds them back without the old details. Disposable
-thumbnail cache files are retained. Finish active work and remove affected images
-from the analysis queue before removing them from the library.
+thumbnail cache files are retained. An image queued or running analysis cannot be removed. Unrelated images can be
+removed while analysis runs, but not during scanning or queue submission.
 
 Double-click a tile to open the full-image viewer. **File info** uses Imagescope's
 public metadata-v1 API in a cancelable background process: format, stored/oriented
@@ -212,10 +255,16 @@ or asks about unsaved edits. Active work gets a visible wait/close dialog; queue
 items are preserved when paused. After confirmation and worker completion, the
 window closes without a second request. Keep editing/Keep open cancels that request. Software/fixture color and
 packaged export/import acceptance are recorded in `docs/EDITOR_IMPLEMENTATION.md`.
-The latest full-suite run passes all 335 tests, plus fresh packaged export/import
-checks at both supported layouts and display scales. The earlier native crash has
-not reproduced and is not claimed fixed. A Qt-property teardown warning also
-reproduces without Image Lab; see the implementation record for remaining limits.
+Release-hardening found intermittent native crashes in Qt/PySide on both host
+and VM. A diagnostic probe traced cross-thread collection of GUI-affine QObject
+cycles; controller workers now coordinate cyclic GC on the GUI thread, and tests
+release orphaned Qt objects there. The exact object corrupted in the original
+core remains unidentified, so residual native risk is disclosed rather than
+claimed eliminated. A separate Qt property-teardown warning also reproduces
+without Image Lab. With the published Imagescope RC2 wheel, 342/342 tests passed
+in a fresh environment, and the packaged editor/export/import smoke passed.
+Manual screen-reader and monitor/HDR behavior have not been certified; see
+`docs/RELEASE_CHECKLIST.md`.
 
 Large images use a bounded working preview rather than being rejected above
 25 megapixels. JPEGs shrink during decoding; other formats decode in a separate,
@@ -376,8 +425,9 @@ fields while updating fields you haven't changed. Saving an empty description or
 list explicitly clears that field. Existing catalogs gain the edits column
 automatically without losing saved results.
 
-Editing is blocked during active work or while the image is queued. Stale drafts
-are rejected if the source or saved metadata changed. An unchanged rescan (including
+Editing details for an unrelated image remains available during analysis. The
+image being edited cannot be queued or running; scanning and queue submission
+still block changes. Stale drafts are rejected if the source or saved metadata changed. An unchanged rescan (including
 thumbnail rebuilding) preserves corrections; rescanning a changed source resets
 both analysis and corrections to avoid attaching old details to different content.
 Current search/filter settings stay active, so saving corrections may remove the
@@ -399,8 +449,8 @@ refuses existing destinations (including symlinks), and preserves the catalog ID
 thumbnail, saved tags, and selected image. The current search and filter remain
 active, so an image renamed out of a filename search may leave the gallery results.
 
-Renaming is blocked during active scanning/analysis/submission and while the image
-is queued. Changed or missing sources must be rescanned first. Catalog path
+Renaming is blocked during scanning or queue submission, and for an image queued
+or running analysis. An unrelated image may be renamed while analysis runs. Changed or missing sources must be rescanned first. Catalog path
 conflicts are rejected even if the corresponding file is missing. When a name is
 taken, the conflict dialog offers an available numbered variant (such as
 `misty-forest-2.jpg`), skipping existing files, directories, symlinks, and catalog
@@ -590,6 +640,9 @@ See `EVALUATION.md` for the reviewed samples and limitations. Local raw results:
 `results/final-v2-768.jsonl` and `results/holdout-v2-768.jsonl`.
 
 ## Tests
+
+For the release-specific dependency, packaged-app, manual-workflow and risk gates,
+see `docs/RELEASE_CHECKLIST.md`.
 
 ```sh
 .venv/bin/python -m unittest discover -s tests -v

@@ -217,7 +217,7 @@ ApplicationWindow {
                     objectName: "confirmLibraryRemoval"
                     theme: window.theme
                     text: "Remove from library"
-                    enabled: !controller.busy && removeDialog.imageIds.length > 0
+                    enabled: !controller.scanning && !controller.submitting && removeDialog.imageIds.length > 0
                     onClicked: {
                         var result = controller.removeImages(removeDialog.imageIds)
                         if (result.ok) {
@@ -274,7 +274,7 @@ ApplicationWindow {
                     confirmRename.proposedName = suggestedName.text
                     confirmRename.open()
                 }
-                ToolTip.text: controller.canRename ? "Review the old and new filenames before renaming" : "Wait for active work to finish and remove this image from the queue"
+                ToolTip.text: controller.canRename ? "Review the old and new filenames before renaming" : "Wait for scanning/submission or this image’s queued analysis to finish"
                 ToolTip.visible: hovered
             }
             Button {
@@ -684,7 +684,7 @@ ApplicationWindow {
                     GalleryAction {
                         objectName: "removeSelectedImages"
                         text: "Remove selected…"
-                        enabled: !controller.busy && controller.checkedCount > 0 && !searchDelay.running
+                        enabled: !controller.scanning && !controller.submitting && controller.checkedCount > 0 && !searchDelay.running
                         onClicked: removeDialog.review(controller.checkedImageIds())
                         ToolTip.visible: hovered
                         ToolTip.text: "Remove selected images from the library, not from disk"
@@ -857,7 +857,7 @@ ApplicationWindow {
                             text: window.item.userEdited ? "Edit details · edited" : "Edit details"
                             enabled: controller.canEditDetails
                             onClicked: detailsEditor.open()
-                            ToolTip.text: "Edit saved text and tags. Finish active work and remove this image from the queue first."
+                            ToolTip.text: "Edit saved text and tags. Other images may analyze; this image must not be queued or running."
                             ToolTip.visible: hovered
                         }
                         Button {
@@ -867,7 +867,7 @@ ApplicationWindow {
                             enabled: controller.canRename
                             onClicked: removeDialog.review([window.item.imageId])
                             ToolTip.visible: hovered
-                            ToolTip.text: "Keep the original file on disk. Finish active work and remove this image from the queue first."
+                            ToolTip.text: "Keep the original file on disk. This image must not be queued or running."
                         }
                         Label {
                             objectName: "imageAnalysisState"

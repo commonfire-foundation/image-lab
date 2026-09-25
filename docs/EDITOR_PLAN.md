@@ -22,8 +22,9 @@ tracking, optional import/retry, Export controls and managed original measuremen
 Keyboard/text-undo and accessible numeric alternatives are verified. S13 restores
 full-suite acceptance (331 passing tests), completes the listed crop presets, improves
 export guidance/errors, and verifies a fresh extracted wheel at both layouts/DPRs.
-Stage 4 remains open for the unreproduced historical native crash and broader manual
-acceptance. Percentage resize input is still missing; pixel resize is available.
+Stage 4 remains open for the unreproduced historical native crash, a reproducible
+Imagescope dependency artifact, and broader manual acceptance. Percentage resize
+input is explicitly deferred beyond 0.1.0; pixel resize is available.
 Color-guided adjustments and later measurement capabilities stay disabled.
 
 Progress/evidence: `docs/EDITOR_IMPLEMENTATION.md`; implemented geometry contract:
@@ -50,7 +51,9 @@ that integration, not authorization to change Imagescope or its release plan.
 - An explicit **Edit image** action in the full-image viewer.
 - Freeform crop and original, 1:1, 4:3, 3:2, 16:9, 9:16, and 21:9 presets.
 - Quarter-turn rotation and horizontal/vertical flips.
-- Aspect-locked resize with pixel dimensions and percentage input.
+- Aspect-locked resize with pixel dimensions. Percentage entry is deferred from
+  0.1.0: it is a convenience control over the same recipe, not an export-safety
+  prerequisite. Keep this item open for a later editing update.
 - Undo, redo, reset, and a hold-to-compare original preview.
 - Export a new PNG, JPEG, or WebP file; never overwrite an existing path.
 - Optional **Add exported copy to library**, off by default.
